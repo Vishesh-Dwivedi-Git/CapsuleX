@@ -171,7 +171,7 @@ export default function MarketplacePage() {
               <h3 className="text-xl font-bold uppercase mb-2">{capsule.name}</h3>
               <p className="text-gray-400 text-sm mb-3">{capsule.description}</p>
               <div className="text-sm text-blue-400 mb-2 italic flex items-center">
-                <Eye className="w-4 h-4 mr-2" /> "{capsule.hint}"
+                <Eye className="w-4 h-4 mr-2" /> {capsule.hint}
               </div>
               <div className="text-sm text-gray-400 flex items-center mb-4">
                 <Clock className="w-4 h-4 mr-2" /> Unlocks: {new Date(capsule.unlockTime).toLocaleDateString()}
