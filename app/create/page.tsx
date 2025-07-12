@@ -5,17 +5,19 @@ import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
-  ArrowLeft,
   Upload,
   Calendar,
   User,
   FileText,
   Eye,
   Lock,
+  Hash,
+  Layers
 } from "lucide-react"
 
 export default function CreateCapsulePage() {
   const router = useRouter()
+
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -23,6 +25,8 @@ export default function CreateCapsulePage() {
     unlockTime: "",
     nominee: "",
     file: null as File | null,
+    mintAmount: 1,
+    creator: "",
   })
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -45,18 +49,18 @@ export default function CreateCapsulePage() {
 
   return (
     <div className="min-h-screen bg-black text-white font-mono">
-       <header className="sticky top-0 bg-black border-b-4 border-yellow-500 z-20">
+      <header className="sticky top-0 bg-black border-b-4 border-yellow-500 z-20">
         <nav className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <div className="w-12 h-12 bg-yellow-500 text-black flex items-center justify-center border-4 border-white">
-              <Lock size={24} aria-hidden="true" />
+              <Lock size={24} />
             </div>
-            <span className="text-3xl font-extrabold tracking-tighter uppercase">CapsuleX</span>
+            <span className="text-3xl font-extrabold uppercase tracking-tighter">CapsuleX</span>
           </div>
           <div className="hidden md:flex space-x-6">
-            {["Home", "Marketplace", "Create", "My Capsules"].map((name, i) => (
+            {["Home", "Marketplace", "Create", "My Capsules"].map((name) => (
               <Link
-                key={i}
+                key={name}
                 href={name === "Home" ? "/" : `/${name.toLowerCase().replace(" ", "-")}`}
                 className="text-white font-bold border-b-4 border-transparent hover:text-blue-500 hover:border-yellow-500 transition-all"
               >
@@ -69,6 +73,7 @@ export default function CreateCapsulePage() {
           </button>
         </nav>
       </header>
+
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="text-center mb-12">
           <h1 className="text-4xl font-extrabold text-white mb-4">Create Your Capsule</h1>
@@ -148,6 +153,37 @@ export default function CreateCapsulePage() {
               onChange={handleInputChange}
               placeholder="Wallet address of trusted person"
               className="w-full px-4 py-3 bg-black border-2 border-white text-white placeholder-gray-500 focus:outline-none hover:border-[#D4A300]"
+            />
+          </div>
+
+          <div>
+            <label className="flex items-center font-bold mb-2 text-[#D4A300]">
+              <Layers className="w-5 h-5 mr-2" /> Number of Copies
+            </label>
+            <input
+              type="number"
+              name="mintAmount"
+              min={1}
+              value={formData.mintAmount}
+              onChange={handleInputChange}
+              placeholder="e.g. 10"
+              className="w-full px-4 py-3 bg-black border-2 border-white text-white focus:outline-none hover:border-[#D4A300]"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="flex items-center font-bold mb-2 text-[#D4A300]">
+              <Hash className="w-5 h-5 mr-2" /> Creator Wallet Address
+            </label>
+            <input
+              type="text"
+              name="creator"
+              value={formData.creator}
+              onChange={handleInputChange}
+              placeholder="Your wallet address"
+              className="w-full px-4 py-3 bg-black border-2 border-white text-white placeholder-gray-500 focus:outline-none hover:border-[#D4A300]"
+              required
             />
           </div>
 
