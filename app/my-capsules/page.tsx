@@ -4,7 +4,9 @@ import { useState, useEffect, SetStateAction } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Clock, Lock, Unlock, Eye, Download, Share2 } from "lucide-react";
+import { Suspense } from "react";
 
+// Mock data
 const mockOwnedCapsules = [
   {
     id: 1,
@@ -48,7 +50,8 @@ const mockOwnedCapsules = [
   },
 ];
 
-export default function MyCapsulesPage() {
+// Define the main component
+function MyCapsulesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab") || "all";
@@ -95,7 +98,7 @@ export default function MyCapsulesPage() {
               </Link>
             ))}
           </div>
-          <button className="px-6 py-3 bg-[#D4A300] text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600 transition-all">
+          <button className="px-6 py-3 bg-[#D4A300] text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600-angular transition-all">
             Connect Wallet
           </button>
         </nav>
@@ -193,5 +196,23 @@ export default function MyCapsulesPage() {
         )}
       </main>
     </div>
+  );
+}
+
+// Wrap the component with Suspense
+export default function MyCapsulesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-black text-white font-mono flex items-center justify-center">
+          <div className="text-center">
+            <Lock className="w-16 h-16 text-[#D4A300] mx-auto mb-4 animate-pulse" />
+            <p className="text-xl text-gray-300">Loading your capsules...</p>
+          </div>
+        </div>
+      }
+    >
+      <MyCapsulesContent />
+    </Suspense>
   );
 }
