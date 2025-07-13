@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, Filter, Clock, Eye, Lock, ShoppingCart } from "lucide-react";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 const mockCapsules = [
   {
@@ -108,7 +109,7 @@ export default function MarketplacePage() {
             ))}
           </div>
           <button className="px-6 py-3 bg-yellow-500 text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600 transition-all">
-            Connect Wallet
+            <ConnectButton showBalance={false} />
           </button>
         </nav>
       </header>

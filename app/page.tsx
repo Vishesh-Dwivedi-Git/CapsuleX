@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowRight, Shield, Clock, Users, Zap, Lock, Globe } from "lucide-react";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 export default function HomePage() {
   return (
@@ -26,9 +27,10 @@ export default function HomePage() {
               </Link>
             ))}
           </div>
-          <button className="px-6 py-3 bg-yellow-500 text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600 transition-all">
-            Connect Wallet
-          </button>
+          <div className="px-6 py-3 bg-yellow-500 text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600 transition-all">
+              
+              <ConnectButton showBalance={false} />
+          </div>
         </nav>
       </header>
 

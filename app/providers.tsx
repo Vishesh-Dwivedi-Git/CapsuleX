@@ -8,7 +8,7 @@ import {
 } from "@rainbow-me/rainbowkit"
 import { WagmiProvider } from "wagmi"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import {  sepolia } from "wagmi/chains"
+import {  citreaTestnet } from "wagmi/chains"
 
 const queryClient = new QueryClient()
 
@@ -16,7 +16,7 @@ const NEXT_PUBLIC_PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID ?? "";
 const config = getDefaultConfig({
   appName: "CapsuleX",
   projectId: NEXT_PUBLIC_PROJECT_ID, // or use WalletConnect's real project ID if you want custom branding
-  chains: [sepolia], // ✅ switch to Citrea chain ID once it's deployed/testnet
+  chains: [citreaTestnet], // ✅ switch to Citrea chain ID once it's deployed/testnet
   ssr: true,
 })
 

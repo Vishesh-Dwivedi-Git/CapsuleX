@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Clock, Lock, Unlock, Eye, Download, Share2 } from "lucide-react";
 import { Suspense } from "react";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 // Mock data
 const mockOwnedCapsules = [
@@ -99,7 +100,7 @@ function MyCapsulesContent() {
             ))}
           </div>
           <button className="px-6 py-3 bg-[#D4A300] text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600-angular transition-all">
-            Connect Wallet
+            <ConnectButton showBalance={false} />
           </button>
         </nav>
       </header>

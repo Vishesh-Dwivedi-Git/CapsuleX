@@ -14,6 +14,7 @@ import {
   Hash,
   Layers
 } from "lucide-react"
+import { ConnectButton } from "@rainbow-me/rainbowkit"
 
 export default function CreateCapsulePage() {
   const router = useRouter()
@@ -69,7 +70,7 @@ export default function CreateCapsulePage() {
             ))}
           </div>
           <button className="px-6 py-3 bg-yellow-500 text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600 transition-all">
-            Connect Wallet
+           <ConnectButton showBalance={false} />
           </button>
         </nav>
       </header>
