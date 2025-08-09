@@ -1,87 +1,195 @@
 "use client";
 
-import { useState, useEffect, SetStateAction } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Clock, Lock, Unlock, Eye, Download, Share2 } from "lucide-react";
-import { Suspense } from "react";
+import { Clock, Lock, Unlock, Eye, Download, Share2, Loader } from "lucide-react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { toast } from "sonner";
+import { useAccount, useReadContracts, useSignMessage } from "wagmi";
+import { capsuleXAbi, capsuleXAddress } from "@/constants/contract";
+import CountdownTimer from "@/components/CountdownTimer";
 
-// Mock data
-const mockOwnedCapsules = [
-  {
-    id: 1,
-    name: "My Secret Recipe",
-    description: "Family recipe to be shared with my children",
-    hint: "The secret ingredient is patience",
-    unlockTime: "2025-12-25T12:00:00",
-    status: "locked",
-    type: "created",
-    file: "recipe.pdf",
-  },
-  {
-    id: 2,
-    name: "Investment Wisdom",
-    description: "Cryptocurrency predictions and investment strategies",
-    hint: "The future of money",
-    unlockTime: "2024-06-01T09:00:00",
-    status: "unlocked",
-    type: "purchased",
-    file: "crypto-predictions.txt",
-  },
-  {
-    id: 3,
-    name: "Love Letters",
-    description: "Romantic letters to be revealed on our anniversary",
-    hint: "Where it all began",
-    unlockTime: "2025-02-14T20:00:00",
-    status: "locked",
-    type: "purchased",
-    file: "letters.zip",
-  },
-  {
-    id: 4,
-    name: "Time Capsule 2030",
-    description: "A collection of memories from 2024",
-    hint: "The year everything changed",
-    unlockTime: "2030-01-01T00:00:00",
-    status: "locked",
-    type: "created",
-    file: "memories.zip",
-  },
-];
+// Types
+interface Capsule {
+  id: bigint;
+  name: string;
+  hint: string;
+  unlockTime: Date;
+  status: 'locked' | 'unlocked';
+  type: 'created' | 'purchased';
+  ipfsHash: string;
+  policyLabel: string;
+}
 
-// Define the main component
 function MyCapsulesContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const tabParam = searchParams.get("tab") || "all";
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const { address: accountAddress, isConnected } = useAccount();
 
-  const [activeTab, setActiveTab] = useState(tabParam);
+    const [myCapsules, setMyCapsules] = useState<Capsule[]>([]);
+    const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "all");
+    const [isProcessing, setIsProcessing] = useState<bigint | null>(null);
 
-  useEffect(() => {
-    if (tabParam && tabParam !== activeTab) {
-      setActiveTab(tabParam);
+    const { signMessageAsync } = useSignMessage();
+
+    // Data fetching for created capsules
+    const { data: createdCapsulesData, isLoading: isLoadingCreated } = useReadContracts({
+        contracts: accountAddress ? [{
+            address: capsuleXAddress,
+            abi: capsuleXAbi as any,
+            functionName: 'createdCapsulesOf',
+            args: [accountAddress as `0x${string}`],
+        }] : [],
+        query: { enabled: !!accountAddress },
+    });
+
+    // Data fetching for owned capsules
+    const { data: ownedCapsulesData, isLoading: isLoadingOwned } = useReadContracts({
+        contracts: accountAddress ? [{
+            address: capsuleXAddress,
+            abi: capsuleXAbi as any,
+            functionName: 'capsulesOfOwner',
+            args: [accountAddress as `0x${string}`],
+        }] : [],
+        query: { enabled: !!accountAddress },
+    });
+
+    // Get unique capsule IDs
+    const createdIds = (createdCapsulesData?.[0]?.result as bigint[]) || [];
+    const ownedIds = (ownedCapsulesData?.[0]?.result as bigint[]) || [];
+    const uniqueIds = [...new Set([...createdIds, ...ownedIds])];
+
+    // Fetch capsule details
+    const { data: capsuleDetails, isLoading: isLoadingDetails } = useReadContracts({
+        contracts: uniqueIds.map((id: bigint) => ({
+            address: capsuleXAddress,
+            abi: capsuleXAbi as any,
+            functionName: 'getCapsule',
+            args: [id],
+        })),
+        query: { enabled: uniqueIds.length > 0 },
+    });
+
+    useEffect(() => {
+        if (capsuleDetails && uniqueIds.length > 0) {
+            const now = new Date();
+            const formatted: Capsule[] = capsuleDetails
+                .filter((res: any) => res.status === 'success')
+                .map((detail: any, index: number) => {
+                    const capsuleData = detail.result;
+                    const unlockTime = new Date(Number(capsuleData.unlockTime) * 1000);
+                    const isCreator = createdIds.some((id: bigint) => id.toString() === uniqueIds[index].toString());
+                    return {
+                        id: uniqueIds[index],
+                        name: capsuleData.title,
+                        hint: capsuleData.hint,
+                        unlockTime: unlockTime,
+                        status: now >= unlockTime ? 'unlocked' : 'locked',
+                        type: isCreator ? 'created' : 'purchased',
+                        ipfsHash: capsuleData.ipfsHash,
+                        policyLabel: capsuleData.policyLabel,
+                    };
+                });
+            setMyCapsules(formatted);
+        }
+    }, [capsuleDetails, uniqueIds, createdIds]);
+
+    const handleTabChange = (tab: string) => {
+        setActiveTab(tab);
+        router.push(`/my-capsules?tab=${tab}`);
+    };
+
+    const triggerDownload = (decryptedBlob: Blob, fileName: string) => {
+        const url = URL.createObjectURL(decryptedBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    const handleUnlockAndDecrypt = async (capsule: Capsule) => {
+        if (!isConnected) return toast.error("Please connect your wallet first!");
+        
+        setIsProcessing(capsule.id);
+        const decryptionPromise = async () => {
+            // 1. Prove ownership
+            toast.info("Please sign the message to prove ownership...");
+            const messageToSign = `I own CapsuleX NFT #${capsule.id.toString()} and wish to decrypt its content.`;
+            const signature = await signMessageAsync({ message: messageToSign });
+
+            // 2. Request re-encryption from NuCypher (placeholder)
+            toast.info("Requesting content key from NuCypher network...");
+            // const reencryptedKey = await nucypher.requestReencryption(capsule.policyLabel, signature);
+            // const symmetricKey = await nucypher.decryptReencryptedKey(reencryptedKey);
+
+            // 3. Download encrypted file from IPFS
+            toast.info("Downloading encrypted file from IPFS...");
+            const ipfsUrl = `https://gateway.pinata.cloud/ipfs/${capsule.ipfsHash}`;
+            const response = await fetch(ipfsUrl);
+            if (!response.ok) throw new Error("Could not fetch file from IPFS.");
+            const encryptedBlob = await response.blob();
+
+            // 4. Decrypt file locally (placeholder)
+            toast.info("Decrypting file...");
+            // const decryptedBlob = await nucypher.decryptWithSymmetricKey(encryptedBlob, symmetricKey);
+            
+            // Using a placeholder for the final step
+            const decryptedBlob = new Blob([`DECRYPTED_CONTENT_OF_${capsule.name}`], { type: 'text/plain' });
+            return { decryptedBlob, fileName: capsule.name.replace(/ /g, '_') + '.txt' };
+        };
+
+        toast.promise(decryptionPromise(), {
+            loading: 'Unlocking & Decrypting Capsule...',
+            success: (result) => {
+                triggerDownload(result.decryptedBlob, result.fileName);
+                return 'Content decrypted successfully!';
+            },
+            error: (err) => err.shortMessage || err.message || 'Decryption failed.',
+            finally: () => setIsProcessing(null),
+        });
+    };
+    
+    if (isLoadingCreated || isLoadingOwned || isLoadingDetails) {
+        return (
+            <div className="min-h-screen bg-black text-white font-mono">
+                <header className="fixed top-0 left-0 right-0 bg-black border-b-4 border-yellow-500 z-50">
+                    <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+                        <Link href="/" className="text-2xl font-bold text-yellow-500">
+                            CapsuleX
+                        </Link>
+                        <div className="flex items-center space-x-4">
+                            <Link href="/marketplace" className="px-4 py-2 bg-yellow-500 text-black border-4 border-white font-bold uppercase hover:bg-blue-500 hover:text-white">
+                                Marketplace
+                            </Link>
+                            <Link href="/create" className="px-4 py-2 bg-yellow-500 text-black border-4 border-white font-bold uppercase hover:bg-blue-500 hover:text-white">
+                                Create
+                            </Link>
+                            <ConnectButton />
+                        </div>
+                    </div>
+                </header>
+                <main className="max-w-7xl mx-auto px-4 pt-24 pb-12">
+                    <div className="text-center py-10">
+                        <Loader className="animate-spin h-12 w-12 mx-auto text-yellow-500" />
+                        <p className="mt-4">Loading Your Capsules...</p>
+                    </div>
+                </main>
+            </div>
+        );
     }
-  }, [tabParam]);
 
-  const handleTabChange = (tab: SetStateAction<string>) => {
-    setActiveTab(tab);
-    const newUrl = `/my-capsules?tab=${tab}`;
-    router.push(newUrl);
-  };
+    const filteredCapsules = myCapsules.filter((capsule) => activeTab === "all" || capsule.type === activeTab);
 
-  const filteredCapsules = mockOwnedCapsules.filter((capsule) => {
-    if (activeTab === "all") return true;
-    return capsule.type === activeTab;
-  });
-
-  return (
-    <div className="min-h-screen bg-black text-white font-mono">
-      <header className="sticky top-0 bg-black border-b-4 border-[#D4A300] z-20">
+    return (
+        <div className="min-h-screen bg-black text-white font-mono">
+            <header className="sticky top-0 bg-black border-b-4 border-yellow-500 z-20">
         <nav className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <div className="w-12 h-12 bg-[#D4A300] text-black flex items-center justify-center border-4 border-white">
+            <div className="w-12 h-12 bg-yellow-500 text-black flex items-center justify-center border-4 border-white">
               <Lock size={24} aria-hidden="true" />
             </div>
             <span className="text-3xl font-extrabold tracking-tighter uppercase">CapsuleX</span>
@@ -91,129 +199,122 @@ function MyCapsulesContent() {
               <Link
                 key={i}
                 href={name === "Home" ? "/" : `/${name.toLowerCase().replace(" ", "-")}`}
-                className={`text-white font-bold border-b-4 transition-all cursor-pointer ${
-                  name === "My Capsules" ? "text-[#D4A300] border-[#D4A300]" : "border-transparent hover:text-blue-500 hover:border-[#D4A300]"
-                }`}
+                className="text-white font-bold border-b-4 border-transparent hover:text-blue-500 hover:border-yellow-500 transition-all"
               >
                 {name}
               </Link>
             ))}
           </div>
-          <button className="px-6 py-3 bg-[#D4A300] text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600-angular transition-all">
-            <ConnectButton showBalance={false} />
-          </button>
+          <div className="px-6 py-3 bg-yellow-500 text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600 transition-all">
+              
+              <ConnectButton showBalance={false} />
+          </div>
         </nav>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 pt-24 pb-12">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-extrabold text-white mb-4">My Capsules</h1>
-          <p className="text-xl text-gray-300">Manage your created and purchased capsules</p>
-        </div>
+            <main className="max-w-7xl mx-auto px-4 pt-24 pb-12">
+                <div className="text-center mb-16">
+                    <h1 className="text-5xl font-extrabold uppercase tracking-tighter border-4 border-white inline-block p-4">
+                        My Capsules
+                    </h1>
+                    <p className="mt-10 text-gray-400 max-w-2xl mx-auto font-medium">
+                        Manage and unlock your time-locked NFT capsules
+                    </p>
+                </div>
 
-        <div className="flex space-x-1 mb-8 bg-white/5 border border-white rounded-lg p-1">
-          {["all", "created", "purchased"].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => handleTabChange(tab)}
-              className={`flex-1 px-4 py-2 font-semibold uppercase transition-all cursor-pointer border-2 ${
-                activeTab === tab
-                  ? "bg-[#D4A300] text-black border-white"
-                  : "text-white border-transparent hover:text-[#D4A300] hover:border-[#D4A300]"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
+                <div className="flex space-x-1 mb-8 bg-white/5 border border-white rounded-lg p-1">
+                    {[
+                        { key: "all", label: "All Capsules" },
+                        { key: "created", label: "Created" },
+                        { key: "purchased", label: "Purchased" }
+                    ].map((tab) => (
+                        <button
+                            key={tab.key}
+                            onClick={() => handleTabChange(tab.key)}
+                            className={`flex-1 py-2 px-4 rounded-md font-bold transition-all ${
+                                activeTab === tab.key
+                                    ? "bg-yellow-500 text-black"
+                                    : "text-gray-400 hover:text-white"
+                            }`}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredCapsules.map((capsule) => (
-            <div
-              key={capsule.id}
-              className="bg-black border-4 border-[#D4A300] p-6 hover:bg-gray-900 transition-all"
-            >
-              <div className="aspect-square bg-black border-4 border-white flex items-center justify-center mb-4">
-                <Lock className="w-10 h-10 text-[#D4A300]" />
-              </div>
-              <h3 className="text-xl font-bold uppercase mb-2">{capsule.name}</h3>
-              <p className="text-gray-400 text-sm mb-3">{capsule.description}</p>
-              <div className="text-sm text-blue-400 mb-2 italic flex items-center">
-                <Eye className="w-4 h-4 mr-2" /> {capsule.hint}
-              </div>
-              <div className="text-sm text-gray-400 flex items-center mb-4">
-                <Clock className="w-4 h-4 mr-2" />
-                {capsule.status === "unlocked"
-                  ? "Unlocked"
-                  : `Unlocks: ${new Date(capsule.unlockTime).toLocaleString()}`}
-              </div>
-              <div className="flex items-center justify-between">
-                {capsule.status === "unlocked" ? (
-                  <>
-                    <button className="px-5 py-2 bg-[#D4A300] text-black font-bold border-2 border-white hover:bg-[#C19500] transition-all flex items-center justify-center">
-                      <Download className="w-4 h-4 mr-2" /> Download
-                    </button>
-                    <button className="px-5 py-2 bg-white text-black font-bold border-2 border-white hover:bg-gray-100 transition-all flex items-center justify-center">
-                      <Share2 className="w-4 h-4 mr-2" /> Share
-                    </button>
-                  </>
-                ) : new Date(capsule.unlockTime) <= new Date() ? (
-                  <button className="px-5 py-2 bg-gradient-to-r from-blue-600 to-green-600 text-white font-bold border-2 border-white hover:from-blue-700 hover:to-green-700 transition-all flex items-center justify-center">
-                    <Unlock className="w-4 h-4 mr-2" /> Unlock Now
-                  </button>
+                {filteredCapsules.length > 0 ? (
+                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filteredCapsules.map((capsule) => (
+                            <div key={capsule.id.toString()} className="bg-black border-4 border-yellow-500 p-6 flex flex-col justify-between">
+                                <div>
+                                    <div className="aspect-square bg-black border-4 border-white flex items-center justify-center mb-4">
+                                        <Lock className="w-10 h-10 text-yellow-500" />
+                                    </div>
+                                    <h3 className="text-xl font-bold uppercase mb-2">{capsule.name}</h3>
+                                    <div className="text-sm text-blue-400 mb-2 italic flex items-center">
+                                        <Eye className="w-4 h-4 mr-2" /> {capsule.hint}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-sm text-gray-400 flex items-center mb-4">
+                                        <Clock className="w-4 h-4 mr-2" />
+                                        {capsule.status === 'locked' ? (
+                                            <CountdownTimer unlockTime={capsule.unlockTime} />
+                                        ) : (
+                                            <span>Ready to Unlock</span>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        {capsule.status === 'unlocked' ? (
+                                            <button 
+                                                onClick={() => handleUnlockAndDecrypt(capsule)} 
+                                                disabled={isProcessing === capsule.id} 
+                                                className="w-full px-5 py-2 bg-gradient-to-r from-blue-600 to-green-600 text-white font-bold border-2 border-white hover:from-blue-700 hover:to-green-700 transition-all flex items-center justify-center disabled:opacity-50"
+                                            >
+                                                {isProcessing === capsule.id ? 
+                                                    <Loader className="w-4 h-4 mr-2 animate-spin" /> : 
+                                                    <Unlock className="w-4 h-4 mr-2" />
+                                                } 
+                                                {isProcessing === capsule.id ? 'Decrypting...' : 'Unlock & Decrypt'}
+                                            </button>
+                                        ) : (
+                                            <button disabled className="w-full px-5 py-2 bg-gray-600 text-gray-300 font-bold border-2 border-white cursor-not-allowed flex items-center justify-center">
+                                                <Lock className="w-4 h-4 mr-2" /> Locked
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 ) : (
-                  <button
-                    disabled
-                    className="px-5 py-2 bg-gray-600 text-gray-300 font-bold border-2 border-white cursor-not-allowed flex items-center justify-center"
-                  >
-                    <Lock className="w-4 h-4 mr-2" /> Locked
-                  </button>
+                    <div className="text-center py-12">
+                        <Lock className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                        <h3 className="text-xl font-bold mb-2">No Capsules Found</h3>
+                        <p className="text-gray-400 mb-6">
+                            {activeTab === "all" 
+                                ? "You don't have any capsules yet." 
+                                : `You don't have any ${activeTab} capsules yet.`
+                            }
+                        </p>
+                        <Link href="/create" className="px-6 py-3 bg-yellow-500 text-black font-bold border-2 border-white hover:bg-yellow-600 transition-all">
+                            Create Your First Capsule
+                        </Link>
+                    </div>
                 )}
-              </div>
-            </div>
-          ))}
+            </main>
         </div>
-
-        {filteredCapsules.length === 0 && (
-          <div className="text-center py-12">
-            <Lock className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-white mb-2">No capsules found</h3>
-            <p className="text-gray-400 mb-6">
-              {activeTab === "created"
-                ? "You haven't created any capsules yet."
-                : activeTab === "purchased"
-                ? "You haven't purchased any capsules yet."
-                : "You don't have any capsules yet."}
-            </p>
-            <Link
-              href={activeTab === "created" ? "/create" : "/marketplace"}
-              className="inline-flex items-center px-6 py-3 bg-[#D4A300] text-black font-bold border-2 border-white hover:bg-[#C19500] transition-all"
-            >
-              {activeTab === "created"
-                ? "Create Your First Capsule"
-                : "Browse Marketplace"}
-            </Link>
-          </div>
-        )}
-      </main>
-    </div>
-  );
+    );
 }
 
-// Wrap the component with Suspense
 export default function MyCapsulesPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-black text-white font-mono flex items-center justify-center">
-          <div className="text-center">
-            <Lock className="w-16 h-16 text-[#D4A300] mx-auto mb-4 animate-pulse" />
-            <p className="text-xl text-gray-300">Loading your capsules...</p>
-          </div>
-        </div>
-      }
-    >
-      <MyCapsulesContent />
-    </Suspense>
-  );
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-black text-white font-mono flex items-center justify-center">
+                <Loader className="w-16 h-16 text-yellow-500 mx-auto mb-4 animate-spin" />
+            </div>
+        }>
+            <MyCapsulesContent />
+        </Suspense>
+    );
 }
