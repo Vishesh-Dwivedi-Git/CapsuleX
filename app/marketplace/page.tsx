@@ -13,13 +13,13 @@ import CountdownTimer from "@/components/CountdownTimer";
 
 // Types
 interface Capsule {
-  id: bigint;
-  name: string;
-  hint: string;
-  unlockTime: Date;
-  price: bigint;
-  creator: string;
-  status: 'locked' | 'unlocked';
+    id: bigint;
+    name: string;
+    hint: string;
+    unlockTime: Date;
+    price: bigint;
+    creator: string;
+    status: 'locked' | 'unlocked';
 }
 
 export default function MarketplacePage() {
@@ -33,14 +33,14 @@ export default function MarketplacePage() {
     const { writeContractAsync: approveAsync } = useWriteContract();
     const { writeContractAsync: buyAsync } = useWriteContract();
 
-    // Data fetching hooks
-    const { data: listedIds, isLoading: isLoadingIds } = useReadContract({
+    // Data fetching hooks for Citrea
+    const { data: listedIds, isLoading: isLoadingIds, isSuccess: isSuccessIds } = useReadContract({
         address: capsuleXAddress,
         abi: capsuleXAbi as any,
         functionName: 'listedCapsules',
     });
 
-    const { data: capsulesData, isLoading: isLoadingData } = useReadContracts({
+    const { data: capsulesData, isLoading: isLoadingData, isSuccess: isSuccessData } = useReadContracts({
         contracts: listedIds ? (listedIds as bigint[]).map((id: bigint) => ({
             address: capsuleXAddress,
             abi: capsuleXAbi as any,
@@ -50,12 +50,13 @@ export default function MarketplacePage() {
         query: { enabled: !!listedIds && (listedIds as bigint[]).length > 0 },
     });
     
-    // Updated logic to format data AND filter out unlocked capsules
+    // A flag to prevent the success toast from showing on every render
+    const [hasLoaded, setHasLoaded] = useState(false);
     useEffect(() => {
-        if (capsulesData && listedIds) {
+        if (capsulesData && listedIds && !hasLoaded) {
             const now = new Date();
             const formattedAndFilteredCapsules: Capsule[] = capsulesData
-                .filter((res: any) => res.status === 'success') // Ensure the contract read was successful
+                .filter((res: any) => res.status === 'success')
                 .map((capsuleResult: any, index: number) => {
                     const unlockTime = new Date(Number(capsuleResult.result.unlockTime) * 1000);
                     const status: 'locked' | 'unlocked' = now >= unlockTime ? 'unlocked' : 'locked';
@@ -69,12 +70,15 @@ export default function MarketplacePage() {
                         status: status,
                     };
                 })
-                // Filter to only show capsules that are still locked
-                .filter((capsule) => capsule.status === 'locked');
+                .filter((capsule: { status: string; }) => capsule.status === 'locked');
 
             setCapsules(formattedAndFilteredCapsules);
+            if (isSuccessIds && isSuccessData) {
+                toast.success(`Loaded ${formattedAndFilteredCapsules.length} capsule(s) for sale.`);
+                setHasLoaded(true);
+            }
         }
-    }, [capsulesData, listedIds]);
+    }, [capsulesData, listedIds, isSuccessIds, isSuccessData, hasLoaded]);
 
     const handleBuyCapsule = async (capsule: Capsule) => {
         if (!isConnected) return toast.error("Please connect your wallet first!");
@@ -83,6 +87,8 @@ export default function MarketplacePage() {
         setProcessingCapsuleId(capsule.id);
         
         const purchasePromise = async () => {
+            // This assumes your contract uses a specific ERC20 token for payment.
+            // If it uses native currency (like cBTC), you would skip the approval step.
             const paymentTokenAddress = await publicClient.readContract({
                 address: capsuleXAddress,
                 abi: capsuleXAbi as any,
@@ -110,59 +116,57 @@ export default function MarketplacePage() {
         };
 
         toast.promise(purchasePromise(), {
-            loading: 'Processing transaction...',
+            loading: 'Processing transaction on Citrea...',
             success: () => {
                 setTimeout(() => router.push('/my-capsules'), 2000);
                 return 'Capsule purchased successfully!';
             },
-            error: (err) => err.shortMessage || 'Purchase failed or was rejected.',
+            error: (err: any) => err.shortMessage || 'Purchase failed or was rejected.',
             finally: () => setProcessingCapsuleId(null),
         });
     };
     
     return (
         <div className="min-h-screen bg-black text-white font-mono">
-            <header className="sticky top-0 bg-black border-b-4 border-yellow-500 z-20">
-        <nav className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className="w-12 h-12 bg-yellow-500 text-black flex items-center justify-center border-4 border-white">
-              <Lock size={24} aria-hidden="true" />
-            </div>
-            <span className="text-3xl font-extrabold tracking-tighter uppercase">CapsuleX</span>
-          </div>
-          <div className="hidden md:flex space-x-6">
-            {["Home", "Marketplace", "Create", "My Capsules"].map((name, i) => (
-              <Link
-                key={i}
-                href={name === "Home" ? "/" : `/${name.toLowerCase().replace(" ", "-")}`}
-                className="text-white font-bold border-b-4 border-transparent hover:text-blue-500 hover:border-yellow-500 transition-all"
-              >
-                {name}
-              </Link>
-            ))}
-          </div>
-          <div className="px-6 py-3 bg-yellow-500 text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600 transition-all">
-              
-              <ConnectButton showBalance={false} />
-          </div>
-        </nav>
-      </header>
+           <header className="sticky top-0 bg-black border-b-4 border-yellow-500 z-20">
+                <nav className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                        <div className="w-12 h-12 bg-yellow-500 text-black flex items-center justify-center border-4 border-white">
+                            <Lock size={24} aria-hidden="true" />
+                        </div>
+                        <span className="text-3xl font-extrabold tracking-tighter uppercase">CapsuleX</span>
+                    </div>
+                    <div className="hidden md:flex space-x-6">
+                        {["Home", "Marketplace", "Create", "My Capsules"].map((name, i) => (
+                            <Link
+                                key={i}
+                                href={name === "Home" ? "/" : `/${name.toLowerCase().replace(" ", "-")}`}
+                                className="text-white font-bold border-b-4 border-transparent hover:text-blue-500 hover:border-yellow-500 transition-all"
+                            >
+                                {name}
+                            </Link>
+                        ))}
+                    </div>
+                    <div className="px-6 py-3 bg-yellow-500 text-black font-bold border-4 border-white uppercase hover:ring-4 hover:ring-blue-600 transition-all">
+                        <ConnectButton showBalance={false} />
+                    </div>
+                </nav>
+            </header>
 
             <main className="max-w-7xl mx-auto px-4 pt-24 pb-12">
                 <div className="text-center mb-16">
                     <h1 className="text-5xl font-extrabold uppercase tracking-tighter border-4 border-white inline-block p-4">
                         NFT Capsule Marketplace
                     </h1>
-
                     <p className="mt-4 text-gray-400 max-w-2xl mx-auto font-medium">
-                    Explore and acquire unique encrypted NFT capsules from creators worldwide
+                        Explore and acquire unique encrypted NFT capsules from creators worldwide
                     </p>
                 </div>
                 
                 {(isLoadingIds || isLoadingData) ? (
                     <div className="text-center py-10">
                         <Loader className="animate-spin h-12 w-12 mx-auto text-yellow-500" />
-                        <p className="mt-4">Loading Capsules...</p>
+                        <p className="mt-4">Loading Capsules from Citrea...</p>
                     </div>
                 ) : capsules.length === 0 ? (
                     <div className="text-center py-10">

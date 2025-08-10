@@ -1,86 +1,95 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-
-// Types
-interface TimeLeft {
-  days: number;
-  hours: number;
-  minutes: number;
-  seconds: number;
-}
+import { useState, useEffect } from "react";
+import { Clock } from "lucide-react";
 
 interface CountdownTimerProps {
   unlockTime: Date;
 }
 
-// A reusable component to display a countdown timer for each capsule
 export default function CountdownTimer({ unlockTime }: CountdownTimerProps) {
-    const calculateTimeLeft = (): TimeLeft => {
-        const difference = unlockTime.getTime() - new Date().getTime();
-        
-        if (difference <= 0) {
-            return {
-                days: 0,
-                hours: 0,
-                minutes: 0,
-                seconds: 0,
-            };
-        }
+  const [timeLeft, setTimeLeft] = useState<{
+    days: number;
+    hours: number;
+    minutes: number;
+    seconds: number;
+  }>({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
-        return {
-            days: Math.floor(difference / (1000 * 60 * 60 * 24)),
-            hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
-            minutes: Math.floor((difference / 1000 / 60) % 60),
-            seconds: Math.floor((difference / 1000) % 60),
-        };
+  const [isUnlocked, setIsUnlocked] = useState(false);
+
+  useEffect(() => {
+    const calculateTimeLeft = () => {
+      const now = new Date().getTime();
+      const unlockTimeMs = unlockTime.getTime();
+      const difference = unlockTimeMs - now;
+
+      if (difference <= 0) {
+        setIsUnlocked(true);
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+        return;
+      }
+
+      const days = Math.floor(difference / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((difference % (1000 * 60)) / 1000);
+
+      setTimeLeft({ days, hours, minutes, seconds });
     };
 
-    const [timeLeft, setTimeLeft] = useState<TimeLeft>(calculateTimeLeft());
+    // Calculate immediately
+    calculateTimeLeft();
 
-    useEffect(() => {
-        const timer = setInterval(() => {
-            const newTimeLeft = calculateTimeLeft();
-            setTimeLeft(newTimeLeft);
-            
-            // Clear interval if countdown is complete
-            if (newTimeLeft.days === 0 && newTimeLeft.hours === 0 && 
-                newTimeLeft.minutes === 0 && newTimeLeft.seconds === 0) {
-                clearInterval(timer);
-            }
-        }, 1000);
+    // Update every second
+    const timer = setInterval(calculateTimeLeft, 1000);
 
-        // Clear the interval on component unmount
-        return () => clearInterval(timer);
-    }, [unlockTime]);
+    return () => clearInterval(timer);
+  }, [unlockTime]);
 
-    // Check if countdown is complete
-    const isComplete = timeLeft.days === 0 && timeLeft.hours === 0 && 
-                      timeLeft.minutes === 0 && timeLeft.seconds === 0;
-
-    if (isComplete) {
-        return (
-            <div className="font-mono text-sm text-green-500">
-                Ready to Unlock!
-            </div>
-        );
-    }
-
-    const formatTimeUnit = (value: number, unit: string): string => {
-        return `${String(value).padStart(2, '0')}${unit.charAt(0)}`;
-    };
-
+  if (isUnlocked) {
     return (
-        <div className="font-mono text-sm text-yellow-500 space-x-1">
-            {timeLeft.days > 0 && (
-                <span>{formatTimeUnit(timeLeft.days, 'days')}</span>
-            )}
-            {timeLeft.days > 0 && <span>:</span>}
-            <span>{formatTimeUnit(timeLeft.hours, 'hours')}</span>
-            <span>:</span>
-            <span>{formatTimeUnit(timeLeft.minutes, 'minutes')}</span>
-            <span>:</span>
-            <span>{formatTimeUnit(timeLeft.seconds, 'seconds')}</span>
-        </div>
+      <span className="text-green-500 font-bold flex items-center">
+        <Clock className="w-4 h-4 mr-2" />
+        UNLOCKED
+      </span>
     );
+  }
+
+  const formatTime = (value: number, label: string) => {
+    if (value === 0) return null;
+    return (
+      <span key={label} className="inline-block">
+        <span className="font-bold">{value}</span>
+        <span className="text-xs ml-1">{label}</span>
+      </span>
+    );
+  };
+
+  const timeParts = [
+    formatTime(timeLeft.days, 'd'),
+    formatTime(timeLeft.hours, 'h'),
+    formatTime(timeLeft.minutes, 'm'),
+    formatTime(timeLeft.seconds, 's')
+  ].filter(Boolean);
+
+  if (timeParts.length === 0) {
+    return (
+      <span className="text-yellow-500 font-bold flex items-center">
+        <Clock className="w-4 h-4 mr-2" />
+        UNLOCKING...
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-yellow-500 font-bold flex items-center">
+      <Clock className="w-4 h-4 mr-2" />
+      {timeParts.map((part, index) => (
+        <span key={index}>
+          {part}
+          {index < timeParts.length - 1 && <span className="mx-1">:</span>}
+        </span>
+      ))}
+    </span>
+  );
 }
