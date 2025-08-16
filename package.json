@@ -13,6 +13,7 @@
     "@nucypher/nucypher-ts": "^0.10.0",
     "@nucypher/taco": "^0.6.0",
     "@rainbow-me/rainbowkit": "^2.2.8",
+    "@tanstack/react-query": "^5.85.3",
     "crypto-js": "^4.2.0",
     "ethers": "^5.8.0",
     "ipfs-http-client": "^60.0.1",
