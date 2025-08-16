@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { ethers } from "ethers";
 
-// Network Configuration
+// Network Configuration (aligned with Providers)
 const NETWORKS = {
   CITREA_TESTNET: { id: 5115, name: "Citrea Testnet" },
   POLYGON_MUMBAI: { id: 80002, name: "Polygon Mumbai" }
@@ -96,7 +96,7 @@ export default function CreateCapsulePage() {
   const router = useRouter();
   const { address, isConnected, chain } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const { switchChain } = useSwitchChain();
+  const { switchChainAsync } = useSwitchChain();
   const { writeContractAsync: mintCapsuleAsync } = useWriteContract();
 
   const [isTacoInitialized, setIsTacoInitialized] = useState(false);
@@ -118,17 +118,19 @@ export default function CreateCapsulePage() {
   useEffect(() => {
     const initTaco = async () => {
       if (!tacoAvailable || !tacoFunctions.initialize) {
-        toast.info("TACo library not available. Using secure fallback encryption.");
+        console.log("TACo unavailable or initialize function missing");
+        toast.info("TACo library not available. Using secure Citrea fallback encryption.");
         return;
       }
 
       try {
         await tacoFunctions.initialize();
         setIsTacoInitialized(true);
+        console.log("TACo initialized successfully");
         toast.success("🐹 TACo Tapir encryption service ready!");
       } catch (error) {
         console.error("TACo Tapir initialization error:", error);
-        toast.info("TACo Tapir initialization failed. Using fallback encryption.");
+        toast.info("TACo Tapir initialization failed. Using Citrea fallback encryption.");
         setIsTacoInitialized(false);
       }
     };
@@ -141,7 +143,8 @@ export default function CreateCapsulePage() {
    */
   const getCombinedDateTime = useCallback(() => {
     if (!formData.unlockDate || !formData.unlockTime) return null;
-    return new Date(`${formData.unlockDate}T${formData.unlockTime}`);
+    const dateTime = new Date(`${formData.unlockDate}T${formData.unlockTime}+05:30`); // IST offset
+    return isNaN(dateTime.getTime()) ? null : dateTime;
   }, [formData.unlockDate, formData.unlockTime]);
 
   const isFormValid = useMemo(
@@ -185,7 +188,6 @@ export default function CreateCapsulePage() {
     setFormData(prev => ({ ...prev, file }));
   }, []);
 
-  // Calendar functions
   /**
    * Generates calendar days for a given year and month
    * @param year - Year to generate calendar for
@@ -242,7 +244,7 @@ export default function CreateCapsulePage() {
       unlockDate: dateString
     }));
     setShowCalendar(false);
-    toast.success(`Date selected: ${new Date(dateString).toLocaleDateString()}`);
+    toast.success(`Date selected: ${new Date(dateString).toLocaleDateString("en-IN")}`);
   }, []);
 
   /**
@@ -317,6 +319,7 @@ export default function CreateCapsulePage() {
     copyIndex: number,
     totalCopies: number
   ): Promise<EncryptedPayload> => {
+    console.log(`Starting Citrea encryption for copy ${copyIndex}/${totalCopies}`);
     const timestamp = Date.now();
     const walletAddress = address || "0x0000000000000000000000000000000000000000";
 
@@ -342,7 +345,6 @@ export default function CreateCapsulePage() {
     const policyId = `0x${hash.padEnd(64, "0").substring(0, 64)}` as `0x${string}`;
 
     console.log(`Generated Citrea policy ID for copy ${copyIndex}: ${policyId}`);
-
     return { ciphertext: encrypted, policyId };
   };
 
@@ -364,6 +366,7 @@ export default function CreateCapsulePage() {
     signer: ethers.Signer,
     unlockTimestamp: number
   ): Promise<EncryptedPayload> => {
+    console.log(`Starting TACo Tapir encryption for copy ${copyIndex}/${totalCopies}`);
     const copySpecificData = `tapir-copy-${copyIndex}-of-${totalCopies}-${Date.now()}-${Math.random()}`;
     const copyBytes = new TextEncoder().encode(copySpecificData);
 
@@ -380,22 +383,26 @@ export default function CreateCapsulePage() {
       chain: NETWORKS.POLYGON_MUMBAI.id
     });
 
-    const messageKit = await tacoFunctions.encrypt!(
-      provider,
-      tacoFunctions.domains!.TESTNET,
-      uniqueMessage,
-      timeCondition,
-      TACO_RITUAL_ID,
-      signer
-    );
+    try {
+      const messageKit = await tacoFunctions.encrypt!(
+        provider,
+        tacoFunctions.domains!.TESTNET,
+        uniqueMessage,
+        timeCondition,
+        TACO_RITUAL_ID,
+        signer
+      );
 
-    const ciphertext = messageKit.toBytes();
-    const hash = Buffer.from(ciphertext).toString("hex");
-    const policyId = `0x${hash.slice(0, 64)}` as `0x${string}`;
+      const ciphertext = messageKit.toBytes();
+      const hash = Buffer.from(ciphertext).toString("hex");
+      const policyId = `0x${hash.slice(0, 64)}` as `0x${string}`;
 
-    console.log(`Generated TACo Tapir policy ID for copy ${copyIndex}: ${policyId}`);
-
-    return { ciphertext, policyId };
+      console.log(`Generated TACo Tapir policy ID for copy ${copyIndex}: ${policyId}`);
+      return { ciphertext, policyId };
+    } catch (error) {
+      console.error(`TACo encryption failed for copy ${copyIndex}:`, error);
+      throw new Error(`TACo encryption failed for copy ${copyIndex}`);
+    }
   };
 
   /**
@@ -407,15 +414,17 @@ export default function CreateCapsulePage() {
   const switchToNetwork = useCallback(
     async (chainId: number, networkName: string) => {
       try {
-        await switchChain({ chainId });
+        console.log(`Switching to network ${networkName} (chainId: ${chainId})`);
+        await switchChainAsync({ chainId });
+        console.log(`Successfully switched to ${networkName}`);
         return true;
       } catch (error) {
         console.error(`Failed to switch to ${networkName} (chain ${chainId}):`, error);
-        toast.error(`Failed to switch to ${networkName}. Please switch manually.`);
+        toast.error(`Failed to switch to ${networkName}. Please switch manually in your Rainbow wallet.`);
         return false;
       }
     },
-    [switchChain]
+    [switchChainAsync]
   );
 
   /**
@@ -423,31 +432,47 @@ export default function CreateCapsulePage() {
    */
   const handleEncryption = async () => {
     if (!walletClient || !formData.file || !formData.unlockDate || !formData.unlockTime) {
+      console.error("Missing required inputs or wallet connection", {
+        walletClient: !!walletClient,
+        file: !!formData.file,
+        unlockDate: formData.unlockDate,
+        unlockTime: formData.unlockTime
+      });
       toast.error("Missing required inputs or wallet connection.");
+      setProcessingStep("idle");
       return;
     }
 
     const unlockDateTime = getCombinedDateTime();
     if (!unlockDateTime || unlockDateTime <= new Date()) {
+      console.error("Invalid or past unlock time", { unlockDateTime });
       toast.error("Unlock time must be in the future.");
+      setProcessingStep("idle");
       return;
     }
 
     setProcessingStep("encrypting");
-    toast.loading(`Creating ${formData.mintAmount} unique encrypted copies...`);
+    const encryptionToastId = `encryption-${Date.now()}`;
+    toast.loading(`Creating ${formData.mintAmount} unique encrypted copies...`, { id: encryptionToastId });
 
     const encryptedCopies: EncryptedPayload[] = [];
-    const message = new Uint8Array(await formData.file.arrayBuffer());
 
     try {
-      if (isTacoInitialized && tacoAvailable && tacoFunctions.encrypt) {
+      console.log("Reading file content...");
+      const message = new Uint8Array(await formData.file.arrayBuffer());
+      console.log(`File content read: ${message.length} bytes`);
+
+      if (isTacoInitialized && tacoAvailable && tacoFunctions.encrypt && tacoFunctions.domains && tacoFunctions.conditions) {
+        console.log("Attempting TACo Tapir encryption");
         try {
           const originalChain = chain?.id;
           let needToSwitchBack = false;
 
           // Switch to Polygon Mumbai for TACo Tapir
           if (originalChain !== NETWORKS.POLYGON_MUMBAI.id) {
-            toast.info(`🐹 Switching to ${NETWORKS.POLYGON_MUMBAI.name} for TACo Tapir encryption...`);
+            toast.loading(`🐹 Switching to ${NETWORKS.POLYGON_MUMBAI.name} for TACo Tapir encryption...`, {
+              id: encryptionToastId
+            });
             const switched = await switchToNetwork(NETWORKS.POLYGON_MUMBAI.id, NETWORKS.POLYGON_MUMBAI.name);
             if (!switched) {
               throw new Error(`Failed to switch to ${NETWORKS.POLYGON_MUMBAI.name}`);
@@ -460,11 +485,14 @@ export default function CreateCapsulePage() {
           const provider = new ethers.providers.Web3Provider(transport);
           const signer = provider.getSigner();
           const unlockTimestamp = Math.floor(unlockDateTime.getTime() / 1000);
+          console.log(`Provider and signer initialized for TACo encryption`);
 
           // Encrypt each copy with TACo Tapir
           for (let i = 0; i < formData.mintAmount; i++) {
             const copyNumber = i + 1;
-            toast.loading(`🐹 Encrypting copy ${copyNumber}/${formData.mintAmount} with TACo Tapir...`);
+            toast.loading(`🐹 Encrypting copy ${copyNumber}/${formData.mintAmount} with TACo Tapir...`, {
+              id: encryptionToastId
+            });
 
             const encryptedData = await createTacoTapirEncryption(
               message,
@@ -476,33 +504,47 @@ export default function CreateCapsulePage() {
             );
 
             encryptedCopies.push(encryptedData);
-            toast.success(`✅ Tapir copy ${copyNumber}/${formData.mintAmount} encrypted!`);
+            toast.success(`✅ Tapir copy ${copyNumber}/${formData.mintAmount} encrypted!`, { id: encryptionToastId });
           }
 
           // Switch back to Citrea for minting
           if (needToSwitchBack && originalChain === NETWORKS.CITREA_TESTNET.id) {
-            toast.info(`🔄 Switching back to ${NETWORKS.CITREA_TESTNET.name} for minting...`);
-            await switchToNetwork(NETWORKS.CITREA_TESTNET.id, NETWORKS.CITREA_TESTNET.name);
+            toast.loading(`🔄 Switching back to ${NETWORKS.CITREA_TESTNET.name} for minting...`, {
+              id: encryptionToastId
+            });
+            const switched = await switchToNetwork(NETWORKS.CITREA_TESTNET.id, NETWORKS.CITREA_TESTNET.name);
+            if (!switched) {
+              throw new Error(`Failed to switch back to ${NETWORKS.CITREA_TESTNET.name}`);
+            }
             await new Promise(resolve => setTimeout(resolve, 1500));
           }
 
-          toast.success("🎉 All copies encrypted with TACo Tapir! Ready for Citrea minting.");
+          toast.success("🎉 All copies encrypted with TACo Tapir! Ready for Citrea minting.", {
+            id: encryptionToastId
+          });
         } catch (tacoError) {
           console.error("TACo Tapir encryption failed:", tacoError);
-          toast.error("❌ TACo Tapir encryption failed. Using Citrea fallback encryption...");
+          toast.error("❌ TACo Tapir encryption failed. Switching to Citrea fallback encryption...", {
+            id: encryptionToastId
+          });
           throw new Error("TACo Tapir failed, using Citrea fallback");
         }
       } else {
-        throw new Error("TACo Tapir not available, using Citrea fallback");
+        console.log("TACo not available or incomplete, using Citrea fallback encryption");
+        toast.info(`🔐 TACo unavailable. Using secure ${NETWORKS.CITREA_TESTNET.name} encryption...`, {
+          id: encryptionToastId
+        });
       }
-    } catch (error) {
-      // Fallback: Use Citrea encryption
-      toast.info(`🔐 Using secure ${NETWORKS.CITREA_TESTNET.name} encryption...`);
 
+      // Fallback to Citrea encryption
       if (chain?.id !== NETWORKS.CITREA_TESTNET.id) {
-        toast.info(`🔄 Switching to ${NETWORKS.CITREA_TESTNET.name} for encryption...`);
+        toast.loading(`🔄 Switching to ${NETWORKS.CITREA_TESTNET.name} for encryption...`, { id: encryptionToastId });
         const switched = await switchToNetwork(NETWORKS.CITREA_TESTNET.id, NETWORKS.CITREA_TESTNET.name);
         if (!switched) {
+          console.error("Failed to switch to Citrea for fallback encryption");
+          toast.error(`Failed to switch to ${NETWORKS.CITREA_TESTNET.name}. Aborting encryption.`, {
+            id: encryptionToastId
+          });
           setProcessingStep("idle");
           return;
         }
@@ -511,19 +553,27 @@ export default function CreateCapsulePage() {
 
       for (let i = 0; i < formData.mintAmount; i++) {
         const copyNumber = i + 1;
-        toast.loading(`🔐 Encrypting copy ${copyNumber}/${formData.mintAmount} on Citrea...`);
+        toast.loading(`🔐 Encrypting copy ${copyNumber}/${formData.mintAmount} on Citrea...`, {
+          id: encryptionToastId
+        });
 
         const encryptedData = await createCitreaEncryption(message, copyNumber, formData.mintAmount);
         encryptedCopies.push(encryptedData);
 
-        toast.success(`✅ Citrea copy ${copyNumber}/${formData.mintAmount} encrypted!`);
+        toast.success(`✅ Citrea copy ${copyNumber}/${formData.mintAmount} encrypted!`, { id: encryptionToastId });
       }
+
+      setEncryptedPayloads(encryptedCopies);
+      toast.success(`🎉 All ${formData.mintAmount} copies encrypted with unique policy IDs!`, {
+        id: encryptionToastId
+      });
+
+      await handleUploadAndMint();
+    } catch (error: any) {
+      console.error("Encryption error:", error);
+      toast.error(error.message || "Encryption failed. Please try again.", { id: encryptionToastId });
+      setProcessingStep("idle");
     }
-
-    setEncryptedPayloads(encryptedCopies);
-    toast.success(`🎉 All ${formData.mintAmount} copies encrypted with unique policy IDs!`);
-
-    await handleUploadAndMint();
   };
 
   /**
@@ -531,16 +581,29 @@ export default function CreateCapsulePage() {
    */
   const handleUploadAndMint = async () => {
     if (!encryptedPayloads.length) {
+      console.error("No encrypted payloads found");
       toast.error("No encrypted data found.");
       setProcessingStep("idle");
       return;
     }
 
+    if (!capsuleXAddress || !capsuleXAbi) {
+      console.error("Contract configuration missing", { capsuleXAddress, capsuleXAbi });
+      toast.error("Contract configuration missing for Citrea Testnet. Please check CapsuleX contract settings.");
+      setProcessingStep("idle");
+      return;
+    }
+
     if (chain?.id !== NETWORKS.CITREA_TESTNET.id) {
-      toast.info(`🔄 Switching to ${NETWORKS.CITREA_TESTNET.name} for minting...`);
+      console.log(`Current chain (${chain?.id}) is not Citrea Testnet (${NETWORKS.CITREA_TESTNET.id})`);
+      const mintToastId = `mint-${Date.now()}`;
+      toast.info(`🔄 Switching to ${NETWORKS.CITREA_TESTNET.name} for minting...`, { id: mintToastId });
       const switched = await switchToNetwork(NETWORKS.CITREA_TESTNET.id, NETWORKS.CITREA_TESTNET.name);
       if (!switched) {
-        toast.error(`Please manually switch to ${NETWORKS.CITREA_TESTNET.name} for minting`);
+        console.error(`Failed to switch to ${NETWORKS.CITREA_TESTNET.name} for minting`);
+        toast.error(`Please manually switch to ${NETWORKS.CITREA_TESTNET.name} in your Rainbow wallet.`, {
+          id: mintToastId
+        });
         setProcessingStep("idle");
         return;
       }
@@ -548,10 +611,15 @@ export default function CreateCapsulePage() {
     }
 
     setProcessingStep("uploading");
+    const mintToastId = `mint-${Date.now()}`;
+    toast.loading("Uploading to IPFS and minting on Citrea...", { id: mintToastId });
 
     try {
       const unlockDateTime = getCombinedDateTime();
-      if (!unlockDateTime) throw new Error("Invalid unlock time");
+      if (!unlockDateTime) {
+        console.error("Invalid unlock time");
+        throw new Error("Invalid unlock time");
+      }
 
       for (let i = 0; i < encryptedPayloads.length; i++) {
         const currentCopy = i + 1;
@@ -559,7 +627,8 @@ export default function CreateCapsulePage() {
         const toastPrefix = `[${currentCopy}/${encryptedPayloads.length}]`;
 
         // Upload to IPFS
-        toast.loading(`${toastPrefix} 📤 Uploading to IPFS...`);
+        console.log(`${toastPrefix} Uploading to IPFS...`);
+        toast.loading(`${toastPrefix} 📤 Uploading to IPFS...`, { id: mintToastId });
         const ipfsFormData = new FormData();
         const encryptedFile = new File(
           [encryptedPayload.ciphertext],
@@ -578,42 +647,54 @@ export default function CreateCapsulePage() {
 
         if (!pinataResponse.ok) {
           const errorText = await pinataResponse.text();
+          console.error(`${toastPrefix} IPFS upload failed: ${errorText}`);
           throw new Error(`${toastPrefix} IPFS upload failed: ${errorText}`);
         }
 
         const { IpfsHash } = await pinataResponse.json();
-        toast.success(`${toastPrefix} ✅ Uploaded to IPFS!`);
+        console.log(`${toastPrefix} Uploaded to IPFS: ${IpfsHash}`);
+        toast.success(`${toastPrefix} ✅ Uploaded to IPFS!`, { id: mintToastId });
 
         // Mint on Citrea
         setProcessingStep("minting");
-        toast.loading(`${toastPrefix} 🏗️ Minting capsule on Citrea...`);
+        console.log(`${toastPrefix} Minting capsule on Citrea...`);
+        toast.loading(`${toastPrefix} 🏗️ Minting capsule on Citrea...`, { id: mintToastId });
 
-        const priceInSmallestUnit = parseUnits(formData.price, 18);
+        const priceInSmallestUnit = parseUnits(formData.price || "0", 18);
 
-        await mintCapsuleAsync({
-          address: capsuleXAddress,
-          abi: capsuleXAbi,
-          functionName: "mintCapsule",
-          args: [
-            `${formData.name} #${currentCopy}`,
-            formData.secretHint,
-            IpfsHash,
-            priceInSmallestUnit,
-            BigInt(Math.floor(unlockDateTime.getTime() / 1000)),
-            encryptedPayload.policyId
-          ]
-        });
-
-        toast.success(`${toastPrefix} 🎉 Capsule minted on Citrea!`);
-        console.log(`Copy ${currentCopy} minted on Citrea with policy ID: ${encryptedPayload.policyId}`);
+        try {
+          await mintCapsuleAsync({
+            address: capsuleXAddress,
+            abi: capsuleXAbi,
+            functionName: "mintCapsule",
+            args: [
+              `${formData.name} #${currentCopy}`,
+              formData.secretHint,
+              IpfsHash,
+              priceInSmallestUnit,
+              BigInt(Math.floor(unlockDateTime.getTime() / 1000)),
+              encryptedPayload.policyId
+            ]
+          });
+          console.log(`${toastPrefix} Successfully minted capsule on Citrea`);
+          toast.success(`${toastPrefix} 🎉 Capsule minted on Citrea!`, { id: mintToastId });
+        } catch (contractError: any) {
+          console.error(`${toastPrefix} Minting failed:`, contractError);
+          throw new Error(
+            contractError.shortMessage || contractError.message || `${toastPrefix} Failed to mint on Citrea`
+          );
+        }
       }
 
       setProcessingStep("complete");
-      toast.success(`🎊 All ${encryptedPayloads.length} unique capsules created on Citrea!`);
-      setTimeout(() => router.push("/my-capsules"), 3000);
+      toast.success(`🎊 All ${encryptedPayloads.length} unique capsules created on Citrea!`, { id: mintToastId });
+      setTimeout(() => {
+        console.log("Redirecting to /my-capsules");
+        router.push("/my-capsules");
+      }, 3000);
     } catch (error: any) {
-      toast.error(error.shortMessage || error.message || "Failed to mint on Citrea.");
       console.error("Minting error:", error);
+      toast.error(error.message || "Failed to mint on Citrea.", { id: mintToastId });
       setProcessingStep("idle");
     }
   };
@@ -625,10 +706,12 @@ export default function CreateCapsulePage() {
   const beginProcess = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isConnected) {
-      toast.error("Please connect your wallet first.");
+      console.error("Wallet not connected");
+      toast.error("Please connect your wallet using Rainbow.");
       return;
     }
     if (!isFormValid) {
+      console.error("Form validation failed", { formData });
       toast.error("Please fill out all required fields and ensure unlock time is in the future.");
       return;
     }
@@ -690,7 +773,7 @@ export default function CreateCapsulePage() {
     if (!isConnected) {
       return (
         <div className={buttonConfigs.disconnected.className}>
-          <p className="text-gray-400 mb-4">Connect your wallet to create capsules on Citrea</p>
+          <p className="text-gray-400 mb-4">Connect your wallet using Rainbow to create capsules on Citrea</p>
           <ConnectButton />
         </div>
       );
@@ -1004,7 +1087,7 @@ export default function CreateCapsulePage() {
                 />
                 <span className="text-sm text-gray-400">
                   {formData.unlockDate && formData.unlockTime && getCombinedDateTime() && (
-                    `Unlocks: ${getCombinedDateTime()!.toLocaleString()}`
+                    `Unlocks: ${getCombinedDateTime()!.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`
                   )}
                 </span>
               </div>
